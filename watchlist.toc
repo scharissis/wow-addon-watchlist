@@ -1,0 +1,10 @@
+## Interface: 90002
+## Title: Watchlist - an auction house price tracker.
+## Notes: Watchlist is a simple auction house item price tracker.
+## Author: Stefano
+## Version: 0.1
+## SavedVariables: WL
+
+
+
+watchlist.lua
