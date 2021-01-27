@@ -1,3 +1,4 @@
 - Capitalize file names (Curse complains)
 - Watchlist per server
 - Tests
+- Migrate to https://wow.gamepedia.com/API_C_AuctionHouse.ReplicateItems

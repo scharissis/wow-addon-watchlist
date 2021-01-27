@@ -79,8 +79,10 @@ end
 function ScanAH()
 	local numScanned = 0;
 	for itemID, _ in pairs(WL.db.watchlist) do
-		local itemKey = C_AuctionHouse.MakeItemKey(itemID)
-		C_AuctionHouse.SendSearchQuery(itemKey, {}, false)
+		local itemKey = C_AuctionHouse.MakeItemKey(itemID);
+		--itemKey.itemLevel = 190;
+		--print(string.format("item key: (id: %s, ilvl: %s, suff: %s)", itemKey.itemID, itemKey.itemLevel, itemKey.itemSuffix));
+		C_AuctionHouse.SendSearchQuery(itemKey, {}, false);
 		numScanned = numScanned + 1;
 	end
 	Message("Scanned AH for "..table.size(WL.db.watchlist).." watchlisted items.");
@@ -97,15 +99,7 @@ function f:OnEvent(event, arg)
 	if event == "ADDON_LOADED" and arg == "Watchlist" then
 		if not WL then
 			-- First ever addon load; init data structures.
-			WL = {
-				db = {
-					watchlist = {},	-- 172438
-					summary = {},
-					history = {
-						-- id -> [{price, ts}]
-					}
-				}
-			};
+			initWL();
 		end
 		if WL then
 			LOCKED_N_LOADED = true
@@ -113,27 +107,35 @@ function f:OnEvent(event, arg)
 		end
 	elseif event == "PLAYER_LOGOUT" then
 	elseif event == "ITEM_SEARCH_RESULTS_UPDATED" and WL ~= nil then
-		itemKey = arg
+		local itemKey = arg
 		for i = 1, C_AuctionHouse.GetNumItemSearchResults(itemKey) do
-			local result = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
-			--print(itemKey.itemID, i, result.buyoutAmount);
-			--print("Completed scan for item "..itemKey.itemID)
-			AddItemHistory(itemKey.itemID, result.buyoutAmount)
-			return
+			local result = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i);
+			local ilvl = getItemLevel(result.itemLink);
+			--print("Completed scan for item "..WL.db.watchlist[itemKey.itemID].." ilvl: "..ilvl)
+			AddItemHistory(itemKey.itemID, result.buyoutAmount);
 		end
 	elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" and WL ~= nil then
-		itemID = arg
+		local itemID = arg
 		for i = 1, C_AuctionHouse.GetNumCommoditySearchResults(itemID) do
-			local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
-			--print(itemID, i, result.quantity, result.unitPrice)
-			AddItemHistory(itemID, result.unitPrice)
-			return
+			local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i);
+			local ilvl = getItemLevel(result.itemID);
+			--print("Completed scan for commodity "..WL.db.watchlist[result.itemID]..", quantity: " .. result.quantity .. ", price: ".. result.unitPrice .. ", ilvl: "..  ilvl);
+			AddItemHistory(itemID, result.unitPrice);
 		end
 	elseif event == "AUCTION_HOUSE_SHOW" then
 		--print("AUCTION_HOUSE_SHOW...");
 	end
 end
 f:SetScript("OnEvent", f.OnEvent);
+
+-- NB: https://wow.gamepedia.com/API_GetDetailedItemLevelInfo
+function getItemLevel(arg)
+	if not arg then
+		return nil
+	end
+	local effectiveILvl, isPreview, baseILvl = GetDetailedItemLevelInfo(arg)
+	return effectiveILvl
+end
 
 -- SLASH CMDs
 
@@ -156,11 +158,31 @@ function SlashCmdList.WATCHLIST(msg, editbox)
 		else
 			AddToWatchlist(args)
 		end
+	elseif cmd == "ilvl" then
+		getItemLevel(args)
+	elseif cmd == "reset" or cmd == "clear" then
+		initWL();
 	else
 		Message("Unknown command.");
 	end
 end
 
+
+--
+-- UTILS
+--
+
+function initWL()
+	WL = {
+		db = {
+			watchlist = {}, -- map[id]name
+			summary = {},
+			history = {
+				-- id -> [{price, ts}]
+			}
+		}
+	};
+end
 function printWatchlist()
 	if table.size(WL.db.watchlist) == 0 then
 		Message("Watchlist is empty.");
