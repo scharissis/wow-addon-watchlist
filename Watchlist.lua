@@ -10,7 +10,7 @@ function makeSummaryItem(price)
     return {minPrice=price, maxPrice=price, lastPrice=price, lastChecked=time()}
 end
 
-function addSummary(itemID, price)
+function addSummary(itemID, itemLevel, price)
 	itemID = tonumber(itemID);
 	price = tonumber(price);
 
@@ -18,19 +18,22 @@ function addSummary(itemID, price)
 	local db = getDB();
 	local summary = db.summary;
 	if summary == nil then
-		summary = {}
+		summary = {};
 	end
 	if summary[itemID] == nil then
-        summary[itemID] = makeSummaryItem(price)
+		summary[itemID] = {};
+	end
+	if summary[itemID][itemLevel] == nil then
+        summary[itemID][itemLevel] = makeSummaryItem(price)
 	else
-		local min, max = summary[itemID].minPrice, summary[itemID].maxPrice
+		local min, max = summary[itemID][itemLevel].minPrice, summary[itemID][itemLevel].maxPrice
 		local tmp = makeSummaryItem(price)
 		tmp.minPrice = math.min(min, price)
 		tmp.maxPrice = math.max(max, price)
 		tmp.lastPrice = price
 		tmp.lastChecked = time()
 		--print(string.format("addSummary(%s,%s): {%s, %s, %s, %s}\n", itemID, price, tmp.minPrice, tmp.maxPrice, tmp.lastPrice, tmp.lastChecked));
-		summary[itemID] = tmp
+		summary[itemID][itemLevel] = tmp
 	end
 end
 
@@ -51,24 +54,27 @@ function AddToWatchlist(itemID)
 	Message("Added "..itemStr(itemID, name).." to the watchlist.");
 end
 
-function AddItemHistory(itemID, price)
-	itemID = tonumber(itemID);
-	price = tonumber(price);
+function AddItemHistory(itemID, itemLevel, price)
+	local itemID = tonumber(itemID);
+	local price = tonumber(price);
 
-	addSummary(itemID, price);
+	addSummary(itemID, itemLevel, price);
 
 	-- Add history
 	local db = getDB();
-    if db.history[itemID] == nil then
-        db.history[itemID] = {makeHistoryItem(price)}
+	if db.history[itemID] == nil then
+		db.history[itemID] = {}
+	end
+    if db.history[itemID][itemLevel] == nil then
+        db.history[itemID][itemLevel] = {makeHistoryItem(price)}
     else
-        timeSince = time() - db.history[itemID][#db.history[itemID]].ts
+        timeSince = time() - db.history[itemID][itemLevel][#db.history[itemID][itemLevel]].ts
         if timeSince > TIME_WINDOW then
-            table.insert(db.history[itemID], makeHistoryItem(price))
+            table.insert(db.history[itemID][itemLevel], makeHistoryItem(price))
         end
 	end
-	--print("DB.history size: "..table.size(WL.db.history))
-	--Message(string.format("Scanned '%s'.", WL.db.watchlist[itemID]));
+	--print("DB.history size: "..table.size(db.history))
+	--Message(string.format("Scanned '%s'.", db.watchlist[itemID][itemLevel]));
 end
 
 function ScanAH()
@@ -76,8 +82,6 @@ function ScanAH()
 	local numScanned = 0;
 	for itemID, _ in pairs(db.watchlist) do
 		local itemKey = C_AuctionHouse.MakeItemKey(itemID);
-		--itemKey.itemLevel = 190;
-		--print(string.format("item key: (id: %s, ilvl: %s, suff: %s)", itemKey.itemID, itemKey.itemLevel, itemKey.itemSuffix));
 		C_AuctionHouse.SendSearchQuery(itemKey, {}, false);
 		numScanned = numScanned + 1;
 	end
@@ -105,20 +109,22 @@ function f:OnEvent(event, arg)
 		end
 	elseif event == "PLAYER_LOGOUT" then
 	elseif event == "ITEM_SEARCH_RESULTS_UPDATED" and WL ~= nil then
-		local itemKey = arg
+		local db = getDB();
+		local itemKey = arg;
 		for i = 1, C_AuctionHouse.GetNumItemSearchResults(itemKey) do
 			local result = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i);
-			local ilvl = getItemLevel(result.itemLink);
-			--print("Completed scan for item "..WL.db.watchlist[itemKey.itemID].." ilvl: "..ilvl)
-			AddItemHistory(itemKey.itemID, result.buyoutAmount);
+			local itemLevel = getItemLevel(result.itemLink);
+			-- print("Completed scan for item "..db.watchlist[itemKey.itemID] ..", quantity: " .. result.quantity ..", ilvl: "..ilvl)
+			AddItemHistory(itemKey.itemID, itemLevel, result.buyoutAmount);
 		end
 	elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" and WL ~= nil then
-		local itemID = arg
+		local db = getDB();
+		local itemID = arg;
 		for i = 1, C_AuctionHouse.GetNumCommoditySearchResults(itemID) do
 			local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i);
-			local ilvl = getItemLevel(result.itemID);
-			--print("Completed scan for commodity "..WL.db.watchlist[result.itemID]..", quantity: " .. result.quantity .. ", price: ".. result.unitPrice .. ", ilvl: "..  ilvl);
-			AddItemHistory(itemID, result.unitPrice);
+			local itemLevel = getItemLevel(result.itemID);
+			-- print("Completed scan for commodity "..db.watchlist[result.itemID]..", quantity: " .. result.quantity .. ", price: ".. result.unitPrice .. ", ilvl: "..  ilvl);
+			AddItemHistory(itemID, itemLevel, result.unitPrice);
 		end
 	elseif event == "AUCTION_HOUSE_SHOW" then
 		--print("AUCTION_HOUSE_SHOW...");
@@ -220,27 +226,41 @@ function printWatchlist()
 	end
 	Message("WATCHLIST ("..table.size(db.watchlist).."):");
 	for itemID, name in pairs(db.watchlist) do
-		Message(" - "..itemStr(itemID, name).." = "..priceStr(itemID));
+		if not db.summary[itemID] then
+			Message(name.." = ?g (unscanned)");
+		else
+			if table.size(db.summary[itemID]) == 1 then
+				local itemLevel = table.getKeys(db.summary[itemID])[1];
+				Message(string.format("%s (%s) = %s", name, itemLevel, priceStr(itemID, itemLevel)));
+			else
+				Message(itemStr(itemID, name, nil)..":");
+				for itemLevel, summary in pairs(db.summary[itemID]) do
+					Message("  - "..itemStr(nil, name, itemLevel).." = "..priceStr(itemID, itemLevel));
+				end
+			end
+		end
 	end
 end
 
-function itemStr(itemID, name)
-	-- if WL.db.watchlist[itemID]
-	-- 	return "?UnknownItem?"
-	-- end
-	-- name = WL.db.watchlist[itemID]
-	return name.." [id: "..itemID.."]"
+function itemStr(itemID, name, itemLevel)
+	if not itemLevel then
+		return name.." [id: "..itemID.."]"
+	end
+	if not itemID then
+		return name.." ("..itemLevel..")"
+	end
+	return name
 end
 
-function priceStr(itemID)
+function priceStr(itemID, itemLevel)
 	local db = getDB();
 	local p = "?g"
-	if db.summary[itemID] then
-		local min = db.summary[itemID].minPrice;
-		local max = db.summary[itemID].maxPrice;
-		local last = db.summary[itemID].lastPrice;
-		local diff = (last/max)*100.0 .. "% of max";
-		p = string.format("{min: %s, max: %s, last: %s (%s)}", asGoldStr(min), asGoldStr(max), asGoldStr(last), diff);
+	if db.summary[itemID][itemLevel] then
+		local min = db.summary[itemID][itemLevel].minPrice;
+		local max = db.summary[itemID][itemLevel].maxPrice;
+		--local last = db.summary[itemID][itemLevel].lastPrice;
+		--local diff = (last/max)*100.0 .. "% of max";
+		p = string.format("{min: %s, max: %s}", asGoldStr(min), asGoldStr(max));
 	end
 	return p
 end
@@ -249,6 +269,16 @@ function Message(message)
 	if (message) then
 		print(LIGHTBLUE_FONT_COLOR:WrapTextInColorCode("WL: ") .. message)
 	end
+end
+
+function table.getKeys(t)
+	local keyset={}
+	local n=0
+	for k,v in pairs(t) do
+		n=n+1
+		keyset[n]=k
+	end
+	return keyset
 end
 
 function table.size(t)

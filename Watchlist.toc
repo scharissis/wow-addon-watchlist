@@ -2,7 +2,7 @@
 ## Title: Watchlist - an auction house price tracker.
 ## Notes: Watchlist is a simple auction house item price tracker.
 ## Author: nikhedoniac
-## Version: 0.3
+## Version: 0.4
 ## SavedVariables: WL
 
 watchlist.lua

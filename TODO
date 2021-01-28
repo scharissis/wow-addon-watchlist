@@ -1,2 +1,3 @@
+- Last seen price doesn't make sense as is (local max)
 - Tests
 - Migrate to https://wow.gamepedia.com/API_C_AuctionHouse.ReplicateItems
